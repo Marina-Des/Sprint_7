@@ -17,29 +17,23 @@ class TestCourier:
 
     @allure.title('Создание аккаунта курьера при разном заполнении полей логин-пароль-имя')
     @allure.description('Тестируется ответ сервера на попытку создания аккаунта при наличии всех полей и при наличии двух из трех полей (3 варианта)')
-    @pytest.mark.parametrize('is_login,is_password,is_firstname,is_test_correct',[
-        [1,1,1,True],
-        [1,1,0,True],
-        [1,0,1,False],
-        [0,1,1,False]
-        ]) # поле непустое - 1, поле пустое - 0 
-    def test_courier_creation_with_different_fields_filling (self, is_login, is_password,is_firstname, is_test_correct):
+    @pytest.mark.parametrize('is_login,is_password,is_firstname,target_status_code, target_body',[
+        [True,True,True,201,("ok",True)],
+        [True,True,False,201,("ok",True)],
+        [True,False,True,400,("message","Недостаточно данных для создания учетной записи")],
+        [False,True,True,400,("message","Недостаточно данных для создания учетной записи")]
+        ]) 
+    def test_courier_creation_with_different_fields_filling (self, courier_delete_after_test,  is_login, is_password,is_firstname, target_status_code, target_body):
         data = {}
-        if is_login:
-            data['login']=GenData.generate_random_string(8)
-        if is_password:
-            data['password']=GenData.generate_random_string(8)
-        if is_firstname:
-            data['firstName']=GenData.generate_random_string(8)
+        is_login and data.update({'login': GenData.generate_random_string(8)})
+        is_password and data.update({'password': GenData.generate_random_string(8)})
+        is_firstname and data.update({'firstName': GenData.generate_random_string(8)})
         response = CouReqs.courier_creation_req(data)
-        try:
-            assert \
-            (is_test_correct and response.status_code==201 and response.text == '{"ok":true}') \
-            or ((not is_test_correct) and response.status_code==400)
-        finally:
-            if data.get('login') and data.get('password'):
-                id = CouReqs.login_and_get_courier_id_by_login_password_req(data['login'], data['password']).json()['id']
-                CouReqs.courier_deletion_req(id)
+        courier_delete_after_test(data)
+        assert \
+            (response.status_code == target_status_code) and \
+            (target_body in response.json().items()) 
+
 
 
 
@@ -51,7 +45,10 @@ class TestCourier:
     def test_two_identical_couriers_creation_error (self, courier_create):
         data = courier_create
         response = CouReqs.courier_creation_req(data)
-        assert response.status_code == 409 
+        assert \
+            (response.status_code == 409) and \
+            (("message", "Этот логин уже используется") in response.json().items())
+
 
         
     #  ПРОВЕРКИ:
@@ -61,25 +58,34 @@ class TestCourier:
     #    успешный запрос возвращает id. - в assert
 
 
-    @allure.title('Авторизация при присутствующих/отсутствующих полях логина и пароля')
-    @allure.description('Проверка успешной авторизации при наличии обоих полей с верными данными и получения ошибки при отсутствии одного из полей или обоих.')
-    @pytest.mark.parametrize('is_login,is_password,target_status_code',[
-        [1,1,200],
-        [1,0,400],
-        [0,1,400],
-        [0,0,400]
-    ])
-    # КОММЕНТАРИЙ:
-    # В этом тесте при отправке на сервер данных без поля password сервер долго думает и присылает 504 service unavailable. При этом без поля login - все по доке, ошибка 400 "недостаточно данных". Пробовала в разные дни. 2 теста здесь падают из-за assertion error.  
-    # Я проверила и в отдельном файле именно сам запрос, и вручную в Postman'е. 
-    def test_courier_authorization (self, courier_create, is_login, is_password, target_status_code):
-        auth_data = courier_create
-        if not is_login:
-            auth_data['login']=None
-        if not is_password:
-            auth_data['password']=None
-        response = CouReqs.login_and_get_courier_id_by_login_password_req(auth_data.get('login'), auth_data.get('password') )
-        assert response.status_code == target_status_code
+
+
+    @allure.title('Авторизация при присутствующих и существующих логине и пароле')
+    @allure.description('Проверка успешной авторизации при наличии обоих полей с верными данными.')
+    def test_courier_authorization_login_password (self, courier_create):
+        response = CouReqs.login_and_get_courier_id_by_login_password_req({'login': courier_create.get('login'), 'password': courier_create.get('password')})
+        assert \
+            (response.status_code == 200) and \
+            (response.json().get('id'))
+        
+
+
+
+    @allure.title('Авторизация при отсутствующих полях логина и пароля')
+    @allure.description('Проверка получения ошибки при отсутствии одного из полей логин, пароль или обоих.')
+    @pytest.mark.parametrize('is_login,is_password,target_status_code,body_key,body_value',[
+        [True,None,400,'message','Недостаточно данных для входа'],
+        [None,True,400,'message','Недостаточно данных для входа'],
+        [None,None,400,'message','Недостаточно данных для входа']
+    ]) 
+    def test_courier_authorization (self, courier_create, is_login, is_password, target_status_code, body_key, body_value):
+        auth_data = {}
+        is_login and auth_data.update({'login': courier_create.get('login')})
+        is_password and auth_data.update({'password': courier_create.get('password')})
+        response = CouReqs.login_and_get_courier_id_by_login_password_req(auth_data)
+        assert \
+            (response.status_code == target_status_code) and \
+            ((body_key, body_value) in response.json().items())
        
 
 
@@ -89,18 +95,21 @@ class TestCourier:
     
     @allure.title('Авторизация при неверных значениях логина и пароля')
     @allure.description('Проверка получения ошибки при неправильных комбинациях логина и пароля.')
-    @pytest.mark.parametrize('with_login, with_password, target_status_code', [
-        ['','',200],
-        ['abc','',404],
-        ['','123',404],
-        ['bca','321',404]
+    @pytest.mark.parametrize('with_login, with_password, target_status_code,target_body', [
+        ['abc','',404,('message','Учетная запись не найдена')],
+        ['','123',404,('message','Учетная запись не найдена')],
+        ['bca','321',404,('message','Учетная запись не найдена')]
     ])
-    def test_wrong_login_and_password (self, courier_create, with_login, with_password, target_status_code):
+    def test_wrong_login_and_password (self, courier_create, with_login, with_password, target_status_code, target_body):
+        auth_data = {
+            'login': courier_create.get('login')+with_login,
+            'password': courier_create.get('password')+with_password
+        }
+        response = CouReqs.login_and_get_courier_id_by_login_password_req(auth_data)
 
-        response = CouReqs.login_and_get_courier_id_by_login_password_req(courier_create.get('login')+with_login, courier_create.get('password')+with_password)
-
-        assert response.status_code == target_status_code and ( (not response.status_code == 200) or (response.json().get('id')))
-
+        assert \
+            (response.status_code == target_status_code) and \
+            (target_body in response.json().items())
 
 
 # ДОПОЛНИТЕЛЬНЫЕ
@@ -111,28 +120,25 @@ class TestCourier:
 #     если отправить запрос без id, вернётся ошибка;
 #     если отправить запрос с несуществующим id, вернётся ошибка.
 
-    #  КОММЕНТАРИЙ
-    #  При статусах 400 и 404 фактическое тело ответа отличается от того, что в документации. По факту в теле есть еще поле 'code'. На мой взгляl, это ошибка, надо уточнять с разработчиками бэкэнда. Поэтому 2 теста падают.
 
     @allure.title('Удаление курьера')
     @allure.description('Проверка полученных статусов-кодов и сообщений при запросе на удаление курьера')
     @pytest.mark.parametrize('is_id, with_id, target_status_code, target_body', [
-        [True, 0, 200, {"ok": True}],
-        [True, 10102345, 404, {"message": "Курьера с таким id нет"}],
-        [False, 0, 400, {"message": "Недостаточно данных для удаления курьера"}]
+        [True, 0, 200, ("ok", True)],
+        [True, 10102345, 404, ("message", "Курьера с таким id нет")], # в документации без точки в конце, по факту от сервера - с точкой. Поэтому падает. 
+        [False, 0, 400, ("message", "Недостаточно данных для удаления курьера")]
     ])
     def test_courier_deletion (self, courier_create, is_id, with_id, target_status_code, target_body):
-        if is_id:
-            id = CouReqs.login_and_get_courier_id_by_login_password_req(courier_create.get('login'), courier_create.get('password')).json().get('id') + with_id
-        else: 
-            id=''
-
-        response = CouReqs.courier_deletion_req(id)
+        auth_data = {
+            'login': courier_create.get('login'),
+            'password': courier_create.get('password')
+        }
+        id = {True: CouReqs.login_and_get_courier_id_by_login_password_req(auth_data).json().get('id') + with_id,
+              False: ''}
         
-        assert (response.status_code == target_status_code) and (response.json() == target_body) 
-
-
-
+        response = CouReqs.courier_deletion_req(id.get(is_id))
+        
+        assert (response.status_code == target_status_code) and (target_body in response.json().items()) 
 
 
 

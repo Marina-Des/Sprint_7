@@ -1,7 +1,6 @@
 import requests
 import allure
-from data import Urls
-import helpers
+from urls import Urls
 
 
 # Здесь собраны все запросы
@@ -18,12 +17,7 @@ class CourierRequests:
 
     @classmethod    
     @allure.step('Запрос на логин курьера в системе и получения id курьера по логину и паролю')
-    def login_and_get_courier_id_by_login_password_req (cls, login, password):
-        auth_data={}
-        if login is not None:
-            auth_data['login']=login
-        if password is not None:
-            auth_data['password']=password
+    def login_and_get_courier_id_by_login_password_req (cls, auth_data):
         response = requests.post(Urls.courier_login_ep, data=auth_data)
         return response
 

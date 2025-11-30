@@ -21,20 +21,18 @@ class TestOrders:
     @allure.title('Создание заказа при разных комбинациях цвета')
     @allure.description('Проверка возможности указания всех цветов, только одного и ни одного в данных заказа')
     @pytest.mark.parametrize('is_black,is_grey', [
-        [1,1],
-        [1,0],
-        [0,1],
-        [0,0]
+        [True,True],
+        [True,False],
+        [False,True],
+        [False,False]
     ])
-    def test_colors_in_order (self, is_black, is_grey):
+    def test_colors_in_order (self, order_cancel_after_test, is_black, is_grey):
         order_data = GenData.data_for_order_creation()
-        if is_black:
-            order_data['color'].append('BLACK')
-        if is_grey:
-            order_data['color'].append('GREY')
+        is_black and order_data['color'].append('BLACK')
+        is_grey and order_data['color'].append('GREY')
         response = OrderReqs.order_creation_req(order_data)
+        order_cancel_after_test(response.json().get('track'))
         assert response.status_code == 201 and (response.json().get('track'))
-        #еще удалить за собой заказ
 
 
 
